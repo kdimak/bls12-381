@@ -5,6 +5,8 @@ import (
 	"hash"
 	"math"
 	"math/big"
+
+	"fmt"
 )
 
 // PointG1 is type for point in G1.
@@ -540,6 +542,9 @@ func (g *G1) HashToCurve(f func() hash.Hash, msg, domain []byte) (*PointG1, erro
 		return nil, err
 	}
 	u0, u1 := hashRes[0], hashRes[1]
+
+	g.osswuExp(u0)
+
 	x0, y0 := swuMapG1(u0)
 	x1, y1 := swuMapG1(u1)
 	one := new(fe).one()
@@ -549,4 +554,92 @@ func (g *G1) HashToCurve(f func() hash.Hash, msg, domain []byte) (*PointG1, erro
 	isogenyMapG1(&p0[0], &p0[1])
 	g.ClearCofactor(p0)
 	return g.Affine(p0), nil
+}
+
+var XI = &fe{0x886c00000023ffdc,
+	0xf70008d3090001d,
+	0x77672417ed5828c3,
+	0x9dac23e943dc1740,
+	0x50553f1b9c131521,
+	0x78c712fbe0ab6e8,
+}
+
+func (g *G1) osswuExp(u *fe) {
+	var params = swuParamsForG1
+
+	usq := new(fe)
+	square(usq, u)
+
+	//<<<
+	xi_usq := new(fe)
+	mul(xi_usq, usq, params.z) // XI
+
+	xi2_u4 := new(fe)
+	square(xi2_u4, xi_usq)
+
+	nd_common := new(fe)
+	add(nd_common, xi_usq, xi2_u4)
+	//>>>
+
+	x0_num := new(fe)
+	add(x0_num, nd_common, new(fe).one())
+	mul(x0_num, x0_num, params.b) // ELLP_B
+
+	x0_den := new(fe)
+	if nd_common.isZero() {
+		mul(x0_den, params.a, params.z) // ELLP_A, XI
+	} else {
+		mul(x0_den, params.a, nd_common) // ELLP_A
+		neg(x0_den, x0_den)
+	}
+
+	gx0_den_sq := new(fe)
+	square(gx0_den_sq, x0_den)
+	gx0_den := new(fe)
+	mul(gx0_den, gx0_den_sq, x0_den)
+
+	//<<<
+	gx0_num := new(fe)
+	mul(gx0_num, gx0_den, params.b) // ELLP_B
+	tmp2 := new(fe)
+	mul(tmp2, gx0_den_sq, x0_num)
+	mul(tmp2, tmp2, params.a) // ELLP_A
+
+	add(gx0_num, gx0_num, tmp2)
+
+	square(tmp2, x0_num)
+	mul(tmp2, tmp2, x0_num)
+
+	add(gx0_num, gx0_num, tmp2)
+
+	//>>>
+
+	sqrt_candidate := func() *fe {
+		tmp1 := new(fe)
+		mul(tmp1, gx0_num, gx0_den)
+
+		tmp2 := new(fe)
+		square(tmp2, gx0_den)
+		mul(tmp2, tmp2, tmp1)
+
+		// TODO add chain
+		//  as a result, tmp2 is changed to
+		//  remove this hardcode
+		*tmp2 = fe{
+			9603680354614924412,
+			983746686070132455,
+			7958276960564301894,
+			7034158915266105779,
+			6974467999659521750,
+			183843923333619465,
+		}
+
+		mul(tmp2, tmp2, tmp1)
+
+		return tmp2
+	}()
+
+	//test_cand := new(fe)
+
+	fmt.Printf("sqrt_candidate: %v", sqrt_candidate)
 }
